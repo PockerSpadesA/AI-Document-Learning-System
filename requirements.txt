@@ -1,0 +1,5 @@
+streamlit
+python-docx
+PyPDF2
+easyocr
+openai
