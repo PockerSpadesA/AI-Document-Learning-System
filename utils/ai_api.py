@@ -1,9 +1,10 @@
 from openai import OpenAI
 import json
 import re
+import streamlit as st
 
 client = OpenAI(
-    api_key="sk-db4f0eb7d2ad4aefb6397b8ac33d4d1a",
+    api_key=["DEEPSEEK_API_KEY"],
     base_url="https://api.deepseek.com"
 )
 
