@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import re
 from datetime import datetime
 from utils.file_parser import parse_document
 from utils.ai_api import generate_exam_paper, correct_exam_paper, evaluate_recitation
@@ -10,7 +11,7 @@ st.set_page_config(
     page_title="AI文档双模式学习系统",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 DATA_DIR = "data"
@@ -20,15 +21,199 @@ EXAM_HISTORY_FILE = os.path.join(DATA_DIR, "exam_history.json")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs("static/backgrounds", exist_ok=True)
 
-DEFAULT_BACKGROUNDS = [
-    "极简深蓝",
-    "清新淡绿",
-    "科技暗紫",
-    "温暖浅橙",
-    "高级灰"
-]
+# ========== 多语言字典（同原版，省略部分保持不变）==========
+L10N = {
+    "zh": {
+        "app_title": "AI智能学习考试系统",
+        "login": "登录",
+        "register": "注册",
+        "username": "用户名",
+        "password": "密码",
+        "confirm_password": "确认密码",
+        "login_btn": "登 录",
+        "register_btn": "注 册",
+        "welcome_back": "欢迎回来，{}！",
+        "register_success": "注册成功！请登录",
+        "user_exists": "用户名已存在",
+        "pwd_mismatch": "两次密码不一致",
+        "pwd_length": "密码长度至少6位",
+        "fill_all": "请填写完整信息",
+        "wrong_cred": "用户名或密码错误",
+        "profile": "个人中心",
+        "upload": "上传文档",
+        "theme_setting": "主题设置",
+        "apply_theme": "应用主题",
+        "wrong_book": "错题本",
+        "exam_history": "考试记录",
+        "no_wrong": "暂无错题，继续保持！",
+        "no_history": "暂无考试记录",
+        "logout": "退出登录",
+        "recite_mode": "背诵检查模式",
+        "exam_mode": "知识练习",
+        "submit_paper": "提交试卷",
+        "score_report": "考试成绩单",
+        "total_score": "总分",
+        "correct_count": "正确题数",
+        "time_used": "用时",
+        "minutes": "分钟",
+        "add_wrong": "加入错题本",
+        "added_wrong": "已加入错题本",
+        "delete_wrong": "删除此错题",
+        "question_types": "选择题型配置",
+        "single_choice": "单选题",
+        "true_false": "判断题",
+        "fill_blank": "填空题",
+        "short_answer": "简答题",
+        "num_questions": "每种题型数量",
+        "generate_paper": "生成试卷",
+        "upload_file": "上传学习资料（支持 PDF / Word / TXT / Markdown）",
+        "parsing": "正在解析文档...",
+        "parse_done": "✅ 文档解析完成：{}（共{}字符）",
+        "select_mode": "选择学习模式",
+        "recite_scope": "背诵范围",
+        "full_text": "全文背诵",
+        "paragraph": "段落背诵",
+        "start_line": "起始行号",
+        "end_line": "结束行号",
+        "reference_text": "参考文本",
+        "recording_hint": "💡 提示：点击录音后朗读，AI将自动评分",
+        "start_recording": "🎙️ 点击开始录音",
+        "submit_recite": "提交检查",
+        "recite_accuracy": "背诵准确率：{}%",
+        "ai_comment": "💬 AI点评：{}",
+        "answer_method": "答题方式（任选其一）：",
+        "keyboard_input": "键盘输入",
+        "photo_input": "拍照手写",
+        "enter_answer": "请输入答案",
+        "upload_photo": "上传答案照片",
+        "ocr_recognizing": "OCR识别中...",
+        "ocr_result": "识别结果：{}",
+        "ocr_fail": "OCR功能未启用，请使用键盘输入",
+        "unanswered": "未作答",
+        "correct": "正确",
+        "wrong": "错误",
+        "analysis": "解析",
+        "score": "得分",
+        "comment": "评价",
+        "detail": "详解",
+        "reference_answer": "参考答案",
+        "wrong_book_empty": "🎉 暂无错题，继续保持！",
+        "filter_by_doc": "按文档筛选错题",
+        "all_docs": "全部",
+        "delete_confirm": "已删除",
+        "exam_record": "考试记录",
+        "exam_time": "考试时间",
+        "question_type_label": "题型",
+        "register_time": "注册时间",
+        "language": "语言",
+        "chinese": "中文",
+        "english": "English",
+        "background_mode": "背景模式",
+        "bg_white": "白色",
+        "bg_black": "黑色",
+        "bg_custom_color": "自定义颜色",
+        "pick_color": "选取颜色",
+        "back_to_upload": "返回出题页面",
+    },
+    "en": {
+        "app_title": "AI Smart Learning & Exam System",
+        "login": "Login",
+        "register": "Register",
+        "username": "Username",
+        "password": "Password",
+        "confirm_password": "Confirm Password",
+        "login_btn": "Login",
+        "register_btn": "Register",
+        "welcome_back": "Welcome back, {}!",
+        "register_success": "Registration successful! Please login.",
+        "user_exists": "Username already exists",
+        "pwd_mismatch": "Passwords do not match",
+        "pwd_length": "Password must be at least 6 characters",
+        "fill_all": "Please fill in all fields",
+        "wrong_cred": "Incorrect username or password",
+        "profile": "Profile",
+        "upload": "Upload Document",
+        "theme_setting": "Theme Settings",
+        "apply_theme": "Apply Theme",
+        "wrong_book": "Wrong Question Book",
+        "exam_history": "Exam History",
+        "no_wrong": "No wrong questions yet. Keep going!",
+        "no_history": "No exam records yet.",
+        "logout": "Logout",
+        "recite_mode": "Recitation Check",
+        "exam_mode": "Knowledge Practice",
+        "submit_paper": "Submit Paper",
+        "score_report": "Score Report",
+        "total_score": "Total Score",
+        "correct_count": "Correct",
+        "time_used": "Time Used",
+        "minutes": "min",
+        "add_wrong": "Add to Wrong Book",
+        "added_wrong": "Added to wrong book",
+        "delete_wrong": "Delete this question",
+        "question_types": "Select Question Types",
+        "single_choice": "Single Choice",
+        "true_false": "True/False",
+        "fill_blank": "Fill in the Blank",
+        "short_answer": "Short Answer",
+        "num_questions": "Number per type",
+        "generate_paper": "Generate Paper",
+        "upload_file": "Upload study material (PDF / Word / TXT / Markdown)",
+        "parsing": "Parsing document...",
+        "parse_done": "✅ Document parsed: {} ({} chars)",
+        "select_mode": "Select Learning Mode",
+        "recite_scope": "Recite Scope",
+        "full_text": "Full Text",
+        "paragraph": "Paragraph",
+        "start_line": "Start line",
+        "end_line": "End line",
+        "reference_text": "Reference Text",
+        "recording_hint": "💡 Click to record, AI will score automatically",
+        "start_recording": "🎙️ Click to start recording",
+        "submit_recite": "Submit Check",
+        "recite_accuracy": "Recitation accuracy: {}%",
+        "ai_comment": "💬 AI comment: {}",
+        "answer_method": "Answer method (choose one):",
+        "keyboard_input": "Keyboard",
+        "photo_input": "Photo handwriting",
+        "enter_answer": "Enter your answer",
+        "upload_photo": "Upload answer photo",
+        "ocr_recognizing": "OCR recognizing...",
+        "ocr_result": "Result: {}",
+        "ocr_fail": "OCR not available, please use keyboard.",
+        "unanswered": "Not answered",
+        "correct": "Correct",
+        "wrong": "Wrong",
+        "analysis": "Analysis",
+        "score": "Score",
+        "comment": "Comment",
+        "detail": "Details",
+        "reference_answer": "Reference Answer",
+        "wrong_book_empty": "🎉 No wrong questions. Keep it up!",
+        "filter_by_doc": "Filter by document",
+        "all_docs": "All",
+        "delete_confirm": "Deleted",
+        "exam_record": "Exam Record",
+        "exam_time": "Exam time",
+        "question_type_label": "Types",
+        "register_time": "Register time",
+        "language": "Language",
+        "chinese": "中文",
+        "english": "English",
+        "background_mode": "Background Mode",
+        "bg_white": "White",
+        "bg_black": "Black",
+        "bg_custom_color": "Custom Color",
+        "pick_color": "Pick a color",
+        "back_to_upload": "Back to Upload",
+    }
+}
 
+def t(key):
+    lang = st.session_state.get("lang", "zh")
+    return L10N.get(lang, L10N["zh"]).get(key, key)
 
+# ========== 工具函数 ==========
 def load_json(file_path):
     if not os.path.exists(file_path):
         return []
@@ -41,139 +226,121 @@ def load_json(file_path):
     except:
         return []
 
-
 def save_json(file_path, data):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+# ========== 主题系统（保持不变）==========
+THEMES = {
+    "极简深蓝": {"primary": "#1e3a8a", "secondary": "#3b82f6", "bg": "#e0e7ff", "card": "#ffffff", "text": "#1e293b", "accent": "#93c5fd"},
+    "清新淡绿": {"primary": "#065f46", "secondary": "#10b981", "bg": "#d1fae5", "card": "#ffffff", "text": "#064e3b", "accent": "#6ee7b7"},
+    "科技暗紫": {"primary": "#5b21b6", "secondary": "#8b5cf6", "bg": "#ede9fe", "card": "#ffffff", "text": "#2e1065", "accent": "#c4b5fd"},
+    "温暖浅橙": {"primary": "#c2410c", "secondary": "#f97316", "bg": "#ffedd5", "card": "#ffffff", "text": "#431407", "accent": "#fdba74"},
+    "高级灰": {"primary": "#374151", "secondary": "#6b7280", "bg": "#f3f4f6", "card": "#ffffff", "text": "#111827", "accent": "#9ca3af"}
+}
 
 def set_background_style():
-    bg_name = st.session_state.get("current_bg", "极简深蓝")
-    bg_colors = {
-        "极简深蓝": "#1e3a8a",
-        "清新淡绿": "#059669",
-        "科技暗紫": "#6d28d9",
-        "温暖浅橙": "#ea580c",
-        "高级灰": "#4b5563"
-    }
-    color = bg_colors.get(bg_name, "#1e3a8a")
-
-    custom_bg = f"static/backgrounds/user_{st.session_state.get('username', '')}.png"
-    if os.path.exists(custom_bg):
-        bg_css = f"""
-        <style>
-        .stApp {{
-            background-image: url("file://{custom_bg}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-        .stApp > div {{
-            background-color: rgba(255, 255, 255, 0.9);
-            border-radius: 10px;
-            padding: 20px;
-        }}
-        </style>
-        """
+    theme_name = st.session_state.get("current_bg", "极简深蓝")
+    theme = THEMES.get(theme_name, THEMES["极简深蓝"])
+    bg_mode = st.session_state.get("background_mode", "white")
+    custom_color = st.session_state.get("bg_custom_color", "#000000")
+    if bg_mode == "white":
+        bg_color = "#ffffff"
+    elif bg_mode == "black":
+        bg_color = "#000000"
     else:
-        bg_css = f"""
-        <style>
-        .stApp {{
-            background: linear-gradient(135deg, {color} 0%, #ffffff 100%);
-        }}
-        .stApp > div {{
-            background-color: rgba(255, 255, 255, 0.95);
-            border-radius: 10px;
-            padding: 20px;
-        }}
-        </style>
-        """
-    st.markdown(bg_css, unsafe_allow_html=True)
+        bg_color = custom_color
+    bg_style = f"background: {bg_color};"
+    css = f"""
+    <style>
+    .stApp {{ {bg_style} }}
+    .stApp > div {{ background-color: rgba(255,255,255,0.95); border-radius: 10px; padding: 20px; }}
+    h1,h2,h3,h4,h5,h6 {{ color: {theme['primary']} !important; }}
+    .stButton > button {{ background-color: {theme['primary']} !important; color: white !important; border-radius: 8px !important; border: none !important; }}
+    .stButton > button:hover {{ background-color: {theme['secondary']} !important; color: white !important; }}
+    .stSidebar .sidebar-content {{ background-color: {theme['card']} !important; }}
+    .stProgress > div > div {{ background-color: {theme['primary']} !important; }}
+    .stMetric .stMetricValue {{ color: {theme['primary']} !important; }}
+    .stExpander {{ border-left: 4px solid {theme['primary']} !important; }}
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
-
+# ========== 认证页面（保持不变）==========
 def auth_page():
-    st.markdown("""
-    <div style='text-align: center; padding: 40px;'>
-        <h1 style='color: #1e3a8a; font-size: 48px;'>📚 AI智能学习考试系统</h1>
-        <p style='color: #666; font-size: 18px;'>文档学习 + 智能出题 + 防作弊考试 + 错题本</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    tab_login, tab_register = st.tabs(["🔐 登录", "✍️ 注册"])
+    tab_login, tab_register = st.tabs([f"🔐 {t('login')}", f"✍️ {t('register')}"])
     users = load_json(USERS_FILE)
-
     with tab_login:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            uname = st.text_input("用户名", key="login_user")
-            pwd = st.text_input("密码", type="password", key="login_pwd")
-
-            if st.button("登 录", use_container_width=True, type="primary"):
+            uname = st.text_input(t("username"), key="login_user")
+            pwd = st.text_input(t("password"), type="password", key="login_pwd")
+            if st.button(t("login_btn"), use_container_width=True, type="primary"):
                 if not uname or not pwd:
-                    st.error("请输入用户名和密码")
+                    st.error(t("fill_all"))
                     return
                 for user in users:
                     if user["username"] == uname and user["password"] == pwd:
                         st.session_state["username"] = uname
                         st.session_state["current_bg"] = user.get("bg", "极简深蓝")
                         st.session_state["bg_history"] = user.get("bg_history", [])
-                        st.success(f"欢迎回来，{uname}！")
+                        st.session_state["background_mode"] = user.get("background_mode", "white")
+                        st.session_state["bg_custom_color"] = user.get("bg_custom_color", "#000000")
+                        st.success(t("welcome_back").format(uname))
                         st.rerun()
-                st.error("用户名或密码错误")
-
+                st.error(t("wrong_cred"))
     with tab_register:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            uname_r = st.text_input("设置用户名", key="reg_user")
-            pwd_r = st.text_input("设置密码", type="password", key="reg_pwd")
-            pwd_confirm = st.text_input("确认密码", type="password", key="reg_pwd_confirm")
-
-            if st.button("注 册", use_container_width=True, type="primary"):
+            uname_r = st.text_input(t("username"), key="reg_user")
+            pwd_r = st.text_input(t("password"), type="password", key="reg_pwd")
+            pwd_confirm = st.text_input(t("confirm_password"), type="password", key="reg_pwd_confirm")
+            if st.button(t("register_btn"), use_container_width=True, type="primary"):
                 if not uname_r or not pwd_r:
-                    st.error("请填写完整信息")
+                    st.error(t("fill_all"))
                     return
                 if pwd_r != pwd_confirm:
-                    st.error("两次密码不一致")
+                    st.error(t("pwd_mismatch"))
                     return
                 if len(pwd_r) < 6:
-                    st.error("密码长度至少6位")
+                    st.error(t("pwd_length"))
                     return
                 for u in users:
                     if u["username"] == uname_r:
-                        st.warning("用户名已存在")
+                        st.warning(t("user_exists"))
                         return
                 new_user = {
                     "username": uname_r,
                     "password": pwd_r,
                     "bg": "极简深蓝",
                     "bg_history": [],
+                    "background_mode": "white",
+                    "bg_custom_color": "#000000",
                     "register_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
                 users.append(new_user)
                 save_json(USERS_FILE, users)
-                st.success("注册成功！请登录")
+                st.success(t("register_success"))
 
-
+# ========== 个人中心（保持不变）==========
 def profile_page():
-    st.markdown("<h2 style='color: #1e3a8a;'>👤 个人中心</h2>", unsafe_allow_html=True)
+    st.markdown(f"<h2 style='color: #1e3a8a;'>👤 {t('profile')}</h2>", unsafe_allow_html=True)
     username = st.session_state["username"]
     users = load_json(USERS_FILE)
     user_data = next((u for u in users if u["username"] == username), None)
-
     col1, col2 = st.columns([1, 2])
     with col1:
         st.markdown(f"""
         <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                     padding: 20px; border-radius: 10px; color: white; text-align: center;'>
             <h3>{username}</h3>
-            <p>注册时间：{user_data.get('register_time', '未知')}</p>
+            <p>{t('register_time')}：{user_data.get('register_time', '未知')}</p>
         </div>
         """, unsafe_allow_html=True)
-
     with col2:
-        st.subheader("🎨 主题设置")
-        bg_select = st.selectbox("选择主题背景", DEFAULT_BACKGROUNDS)
-        if st.button("应用主题", use_container_width=True):
+        st.subheader(f"🎨 {t('theme_setting')}")
+        bg_select = st.selectbox(t("theme_setting"), list(THEMES.keys()))
+        if st.button(t("apply_theme"), use_container_width=True):
             st.session_state["current_bg"] = bg_select
             hist = user_data.get("bg_history", [])
             if bg_select not in hist:
@@ -181,271 +348,277 @@ def profile_page():
                 user_data["bg_history"] = hist[-5:]
             user_data["bg"] = bg_select
             save_json(USERS_FILE, users)
-            st.success("主题已切换")
+            st.success(t("apply_theme"))
             st.rerun()
-
-        up_bg = st.file_uploader("上传自定义背景图", type=["png", "jpg", "jpeg"])
-        if up_bg:
-            save_path = f"static/backgrounds/user_{username}.png"
-            with open(save_path, "wb") as f:
-                f.write(up_bg.getbuffer())
-            st.session_state["current_bg"] = save_path
-            st.success("自定义背景已生效")
-            st.rerun()
-
+        st.subheader(f"🖼️ {t('background_mode')}")
+        bg_opts = [t("bg_white"), t("bg_black"), t("bg_custom_color")]
+        current_mode = st.session_state.get("background_mode", "white")
+        mode_map = {"white": 0, "black": 1, "custom": 2}
+        idx = mode_map.get(current_mode, 0)
+        selected = st.radio(t("background_mode"), bg_opts, index=idx, key="bg_radio")
+        if selected == t("bg_custom_color"):
+            current_color = st.session_state.get("bg_custom_color", "#000000")
+            new_color = st.color_picker(t("pick_color"), value=current_color, key="color_picker")
+            if new_color != current_color:
+                st.session_state["bg_custom_color"] = new_color
+                user_data["bg_custom_color"] = new_color
+                save_json(USERS_FILE, users)
+                if st.session_state.get("background_mode") != "custom":
+                    st.session_state["background_mode"] = "custom"
+                    user_data["background_mode"] = "custom"
+                    save_json(USERS_FILE, users)
+                st.rerun()
+            if st.session_state.get("background_mode") != "custom":
+                st.session_state["background_mode"] = "custom"
+                user_data["background_mode"] = "custom"
+                save_json(USERS_FILE, users)
+                st.rerun()
+        else:
+            mode_key = "white" if selected == t("bg_white") else "black"
+            if st.session_state.get("background_mode") != mode_key:
+                st.session_state["background_mode"] = mode_key
+                user_data["background_mode"] = mode_key
+                save_json(USERS_FILE, users)
+                st.rerun()
     st.divider()
-
-    tab_wrong, tab_history = st.tabs(["📒 错题本", "📊 考试记录"])
-
+    tab_wrong, tab_history = st.tabs([f"📒 {t('wrong_book')}", f"📊 {t('exam_history')}"])
     with tab_wrong:
-        st.subheader("📒 我的错题本")
+        st.subheader(f"📒 {t('wrong_book')}")
         wrong_all = load_json(WRONG_QUESTIONS_FILE)
         user_wrong = [w for w in wrong_all if w["username"] == username]
-
         if user_wrong:
             doc_list = sorted(list({item["doc_name"] for item in user_wrong}))
-            sel_doc = st.selectbox("按文档筛选错题", ["全部"] + doc_list)
-
+            sel_doc = st.selectbox(t("filter_by_doc"), [t("all_docs")] + doc_list)
             filtered_wrong = user_wrong
-            if sel_doc != "全部":
+            if sel_doc != t("all_docs"):
                 filtered_wrong = [w for w in user_wrong if w["doc_name"] == sel_doc]
-
-            st.info(f"共 {len(filtered_wrong)} 道错题")
-
+            st.info(f"{t('wrong_book')}：共 {len(filtered_wrong)} 题")
             for idx, item in enumerate(filtered_wrong, 1):
                 with st.expander(f"❌ 第{idx}题 - {item['question'][:50]}..."):
-                    st.markdown(f"**题目：** {item['question']}")
-                    st.markdown(f"**你的答案：** <span style='color: red;'>{item['user_ans']}</span>",
-                                unsafe_allow_html=True)
-                    st.markdown(f"**正确答案：** <span style='color: green;'>{item['correct_ans']}</span>",
-                                unsafe_allow_html=True)
-                    st.markdown(f"**解析：** {item['analysis']}")
+                    st.markdown(f"**{t('question_types')}：** {item['question']}")
+                    st.markdown(f"**{t('wrong_book')}：** <span style='color: red;'>{item['user_ans']}</span>", unsafe_allow_html=True)
+                    st.markdown(f"**{t('reference_answer')}：** <span style='color: green;'>{item['correct_ans']}</span>", unsafe_allow_html=True)
+                    st.markdown(f"**{t('analysis')}：** {item['analysis']}")
                     st.caption(f"文档：{item['doc_name']} | 时间：{item.get('time', '未知')}")
-
-                    if st.button(f"删除此错题", key=f"del_{idx}_{item['question'][:20]}"):
+                    if st.button(f"{t('delete_wrong')}", key=f"del_{idx}_{item['question'][:20]}"):
                         wrong_all.remove(item)
                         save_json(WRONG_QUESTIONS_FILE, wrong_all)
-                        st.success("已删除")
+                        st.success(t("delete_confirm"))
                         st.rerun()
         else:
-            st.success("🎉 暂无错题，继续保持！")
-
+            st.success(t("wrong_book_empty"))
     with tab_history:
-        st.subheader("📊 历史考试记录")
+        st.subheader(f"📊 {t('exam_history')}")
         history_all = load_json(EXAM_HISTORY_FILE)
         user_history = [h for h in history_all if h["username"] == username]
-
         if user_history:
-            st.info(f"共参加 {len(user_history)} 次考试")
-
+            st.info(f"{t('exam_history')}：共 {len(user_history)} 次")
             for idx, record in enumerate(reversed(user_history), 1):
-                with st.expander(f"📝 {record['doc_name']} - {record.get('score', 0)}分"):
+                with st.expander(f"📝 {record['doc_name']} - {record.get('score', 0)}{t('total_score')}"):
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("得分", f"{record.get('score', 0)}")
+                        st.metric(t("total_score"), f"{record.get('score', 0)}")
                     with col2:
-                        st.metric("正确率", f"{record.get('accuracy', 0)}%")
+                        st.metric(t("correct_count"), f"{record.get('accuracy', 0)}%")
                     with col3:
-                        st.metric("用时", f"{record.get('duration', 0)}分钟")
-
-                    st.caption(f"考试时间：{record.get('exam_time', '未知')}")
-                    st.caption(f"题型：{', '.join(record.get('types', []))}")
+                        st.metric(t("time_used"), f"{record.get('duration', 0)}{t('minutes')}")
+                    st.caption(f"{t('exam_time')}：{record.get('exam_time', '未知')}")
+                    st.caption(f"{t('question_type_label')}：{', '.join(record.get('types', []))}")
         else:
-            st.info("暂无考试记录")
-
+            st.info(t("no_history"))
     st.divider()
-    if st.button("🚪 退出登录", use_container_width=True, type="secondary"):
+    if st.button(f"🚪 {t('logout')}", use_container_width=True, type="secondary"):
         st.session_state.clear()
         st.rerun()
 
-
+# ========== 背诵模式（保持不变）==========
 def recite_mode(doc_name, content):
-    st.markdown("<h3 style='color: #059669;'>🎤 背诵检查模式</h3>", unsafe_allow_html=True)
-
-    scope = st.radio("背诵范围", ["全文背诵", "段落背诵"])
+    st.markdown(f"<h3 style='color: #059669;'>🎤 {t('recite_mode')}</h3>", unsafe_allow_html=True)
+    scope = st.radio(t("recite_scope"), [t("full_text"), t("paragraph")])
     show_text = content
-
-    if scope == "段落背诵":
+    if scope == t("paragraph"):
         lines = content.split('\n')
-        start_idx = st.number_input("起始行号", min_value=1, max_value=len(lines), value=1)
-        end_idx = st.number_input("结束行号", min_value=start_idx, max_value=len(lines),
-                                  value=min(start_idx + 10, len(lines)))
+        start_idx = st.number_input(t("start_line"), min_value=1, max_value=len(lines), value=1)
+        end_idx = st.number_input(t("end_line"), min_value=start_idx, max_value=len(lines), value=min(start_idx + 10, len(lines)))
         show_text = '\n'.join(lines[start_idx - 1:end_idx])
-
-    st.text_area("参考文本", show_text, height=200, disabled=True)
-
-    st.info("💡 提示：点击录音后朗读，AI将自动评分")
-    audio = st.audio_input("🎙️ 点击开始录音")
-
+    st.text_area(t("reference_text"), show_text, height=200, disabled=True)
+    st.info(t("recording_hint"))
+    audio = st.audio_input(t("start_recording"))
     if audio:
-        if st.button("提交检查", type="primary"):
-            with st.spinner("AI正在分析..."):
+        if st.button(t("submit_recite"), type="primary"):
+            with st.spinner(t("parsing")):
                 score, comment = evaluate_recitation(show_text, audio)
             st.progress(score / 100)
-            st.success(f"背诵准确率：{score}%")
-            st.info(f"💬 AI点评：{comment}")
+            st.success(t("recite_accuracy").format(score))
+            st.info(t("ai_comment").format(comment))
 
-
-def exam_interface(doc_name, content, question_types):
-    st.markdown("<h3 style='color: #dc2626;'>📝 智能考试系统</h3>", unsafe_allow_html=True)
+# ========== 考试界面（已移除防作弊，确保未作答得0分）==========
+def exam_interface(doc_name, content, question_types, num_per_type):
+    st.markdown(f"<h3 style='color: #dc2626;'>📝 {t('exam_mode')}</h3>", unsafe_allow_html=True)
 
     if "paper" not in st.session_state:
-        with st.spinner("AI正在生成试卷..."):
-            st.session_state["paper"] = generate_exam_paper(content, question_types)
+        with st.spinner(t("parsing")):
+            st.session_state["paper"] = generate_exam_paper(content, question_types, num_per_type)
             st.session_state["exam_start_time"] = datetime.now()
-            st.session_state["blur_count"] = 0
+
     paper = st.session_state["paper"]
 
-    blur_count = st.session_state.get("blur_count", 0)
-
-    st.markdown(f"""
-    <script>
-    let blurCount = {blur_count};
-    window.addEventListener('blur', function() {{
-        blurCount++;
-        fetch('/api/blur?count=' + blurCount);
-        if (blurCount >= 3) {{
-            alert('检测到切屏超过3次，系统将自动交卷！');
-            document.querySelector('button[kind="primary"]').click();
-        }}
-    }});
-    </script>
-    """, unsafe_allow_html=True)
-
-    if blur_count >= 3:
-        st.error("⚠️ 检测到切屏超过3次，系统已强制交卷！")
-        if "exam_result" not in st.session_state:
-            user_answers = st.session_state.get("temp_answers", {})
-            result = correct_exam_paper(paper, user_answers)
-            st.session_state["exam_result"] = result
-            save_exam_result(doc_name, question_types, paper, user_answers, result)
-
-    st.warning(f"⚠️ 防作弊监控中 | 切屏次数：{blur_count}/3")
+    if "exam_result" in st.session_state:
+        display_exam_result(doc_name)
+        return
 
     user_answers = {}
-
     for idx, q in enumerate(paper):
         st.markdown("---")
         st.markdown(f"**<span style='font-size: 18px; color: #1e3a8a;'>第{idx + 1}题 [{q['type']}]</span>**",
                     unsafe_allow_html=True)
         st.markdown(f"**{q['question']}**")
-
         q_type = q["type"]
 
         if q_type in ["单选题", "判断题"]:
             opts = q.get("options", [])
-            user_answers[idx] = st.radio("请选择答案：", opts, key=f"q_{idx}", label_visibility="collapsed")
-
+            choice = st.radio(
+                t("single_choice") if q_type == "单选题" else t("true_false"),
+                opts, key=f"q_{idx}", label_visibility="collapsed", index=None
+            )
+            if choice:
+                if q_type == "单选题":
+                    user_answers[idx] = re.sub(r'^[\d]\.\s*', '', choice)
+                else:
+                    user_answers[idx] = choice
+            else:
+                user_answers[idx] = ""   # 未选择
         elif q_type == "填空题":
-            st.markdown("**答题方式（任选其一）：**")
-            tab_txt, tab_photo = st.tabs(["键盘输入", "拍照手写"])
-
+            st.markdown(f"**{t('answer_method')}**")
+            tab_txt, tab_photo = st.tabs([t("keyboard_input"), t("photo_input")])
             with tab_txt:
-                txt_ans = st.text_input("请输入答案", key=f"txt_{idx}")
-
+                txt_ans = st.text_input(t("enter_answer"), key=f"txt_{idx}")
             with tab_photo:
-                st.info("📸 请拍摄手写答案，确保字迹清晰")
-                photo_ans = st.file_uploader("上传答案照片", type=["jpg", "png", "jpeg"], key=f"photo_{idx}")
+                st.info("📸 " + t("upload_photo"))
+                photo_ans = st.file_uploader(t("upload_photo"), type=["jpg", "png", "jpeg"], key=f"photo_{idx}")
+                ocr_text = ""
                 if photo_ans:
-                    with st.spinner("OCR识别中..."):
+                    with st.spinner(t("ocr_recognizing")):
                         ocr_text = image_to_text(photo_ans)
-                    st.success(f"识别结果：{ocr_text}")
-                else:
-                    ocr_text = ""
-
+                    st.success(t("ocr_result").format(ocr_text))
             user_answers[idx] = txt_ans if txt_ans else ocr_text
-
         elif q_type == "简答题":
-            st.markdown("**答题方式（任选其一）：**")
-            tab_txt, tab_photo = st.tabs(["键盘输入", "拍照手写"])
-
+            st.markdown(f"**{t('answer_method')}**")
+            tab_txt, tab_photo = st.tabs([t("keyboard_input"), t("photo_input")])
             with tab_txt:
-                txt_ans = st.text_area("请输入答案", height=150, key=f"txt_{idx}")
-
+                txt_ans = st.text_area(t("enter_answer"), height=150, key=f"txt_{idx}")
             with tab_photo:
-                st.info("📸 请拍摄手写答案，支持多行文字")
-                photo_ans = st.file_uploader("上传答案照片", type=["jpg", "png", "jpeg"], key=f"photo_{idx}")
+                st.info("📸 " + t("upload_photo"))
+                photo_ans = st.file_uploader(t("upload_photo"), type=["jpg", "png", "jpeg"], key=f"photo_{idx}")
+                ocr_text = ""
                 if photo_ans:
-                    with st.spinner("OCR识别中..."):
+                    with st.spinner(t("ocr_recognizing")):
                         ocr_text = image_to_text(photo_ans)
-                    st.success(f"识别结果：{ocr_text}")
-                else:
-                    ocr_text = ""
-
+                    st.success(t("ocr_result").format(ocr_text))
             user_answers[idx] = txt_ans if txt_ans else ocr_text
 
     st.session_state["temp_answers"] = user_answers
-
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("✅ 提交试卷", use_container_width=True, type="primary"):
-            with st.spinner("AI正在批改试卷..."):
+        if st.button(f"✅ {t('submit_paper')}", use_container_width=True, type="primary"):
+            with st.spinner(t("parsing")):
                 result = correct_exam_paper(paper, user_answers)
+                # 强制修正：未作答一律判错，并修改显示文本中的图标和得分
+                for i, res in enumerate(result):
+                    if user_answers.get(i, "").strip() == "":
+                        res["is_correct"] = False
+                        if "得分：" in res.get("display", ""):
+                            res["display"] = re.sub(r'得分：\d+', '得分：0', res["display"])
+                        res["display"] = res.get("display", "").replace("✅", "❌")
                 st.session_state["exam_result"] = result
                 save_exam_result(doc_name, question_types, paper, user_answers, result)
             st.rerun()
 
-    if "exam_result" in st.session_state:
-        st.divider()
-        st.markdown("<h3 style='color: #059669;'>📊 考试成绩单</h3>", unsafe_allow_html=True)
+def display_exam_result(doc_name):
+    st.divider()
+    st.markdown(f"<h3 style='color: #059669;'>📊 {t('score_report')}</h3>", unsafe_allow_html=True)
+    result = st.session_state["exam_result"]
+    paper = st.session_state.get("paper", [])
+    user_answers = st.session_state.get("temp_answers", {})
+    total = len(result)
+    total_score = 0
+    for item in result:
+        disp = item["display"]
+        score_match = re.search(r'得分：(\d+)', disp)
+        if score_match:
+            total_score += int(score_match.group(1))
+        else:
+            if item["is_correct"]:
+                total_score += 100
 
-        result = st.session_state["exam_result"]
-        total = len(result)
-        correct = sum(1 for r in result if "正确" in r or "✓" in r or "√" in r)
-        accuracy = int((correct / total) * 100) if total > 0 else 0
+    avg_score = int(total_score / total) if total > 0 else 0
+    correct = sum(1 for r in result if r.get("is_correct", False))
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("总分", f"{accuracy}分")
-        with col2:
-            st.metric("正确题数", f"{correct}/{total}")
-        with col3:
-            start_time = st.session_state.get("exam_start_time", datetime.now())
-            duration = int((datetime.now() - start_time).total_seconds() / 60)
-            st.metric("用时", f"{duration}分钟")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(t("total_score"), f"{avg_score}分")
+    with col2:
+        st.metric(t("correct_count"), f"{correct}/{total}")
+    with col3:
+        start_time = st.session_state.get("exam_start_time", datetime.now())
+        duration = int((datetime.now() - start_time).total_seconds() / 60)
+        st.metric(t("time_used"), f"{duration}{t('minutes')}")
+    st.progress(avg_score / 100)
 
-        st.progress(accuracy / 100)
-
-        for idx, item in enumerate(result, 1):
-            is_correct = "正确" in item or "✓" in item or "√" in item
-            icon = "✅" if is_correct else "❌"
-            with st.expander(f"{icon} 第{idx}题 - {item[:50]}..."):
-                st.markdown(item)
-
-                if not is_correct:
-                    if st.button(f"加入错题本", key=f"save_{idx}"):
-                        wrong_all = load_json(WRONG_QUESTIONS_FILE)
-                        wrong_all.append({
-                            "username": st.session_state["username"],
-                            "doc_name": doc_name,
-                            "question": paper[idx - 1]["question"],
-                            "user_ans": user_answers.get(idx - 1, ""),
-                            "correct_ans": paper[idx - 1]["answer"],
-                            "analysis": paper[idx - 1].get("analysis", ""),
-                            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
-                        save_json(WRONG_QUESTIONS_FILE, wrong_all)
-                        st.success("已加入错题本")
-
+    for idx, item in enumerate(result):
+        is_correct = item.get("is_correct", False)
+        # 二次确保未作答显示红叉
+        if user_answers.get(idx, "").strip() == "" and is_correct:
+            is_correct = False
+            item["display"] = item.get("display", "").replace("✅", "❌")
+        icon = "✅" if is_correct else "❌"
+        with st.expander(f"{icon} 第{idx + 1}题"):
+            st.markdown(item.get("display", ""))
+            if not is_correct and paper:
+                if st.button(f"{t('add_wrong')}", key=f"save_result_{idx}"):
+                    wrong_all = load_json(WRONG_QUESTIONS_FILE)
+                    wrong_all.append({
+                        "username": st.session_state["username"],
+                        "doc_name": doc_name,
+                        "question": paper[idx]["question"],
+                        "user_ans": user_answers.get(idx, ""),
+                        "correct_ans": paper[idx]["answer"],
+                        "analysis": paper[idx].get("analysis", ""),
+                        "reference": paper[idx].get("reference", ""),
+                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    save_json(WRONG_QUESTIONS_FILE, wrong_all)
+                    st.success(t("added_wrong"))
+    if st.button(f"🔙 {t('back_to_upload')}", use_container_width=True):
+        for key in ["paper", "exam_result", "temp_answers"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
 
 def save_exam_result(doc_name, types, paper, user_answers, result):
     history = load_json(EXAM_HISTORY_FILE)
     total = len(result)
-    correct = sum(1 for r in result if "正确" in r or "✓" in r or "√" in r)
-    accuracy = int((correct / total) * 100) if total > 0 else 0
-
+    total_score = 0
+    correct = 0
+    for r in result:
+        if r["is_correct"]:
+            correct += 1
+        disp = r["display"]
+        score_match = re.search(r'得分：(\d+)', disp)
+        if score_match:
+            total_score += int(score_match.group(1))
+    avg_score = int(total_score / total) if total > 0 else 0
     start_time = st.session_state.get("exam_start_time", datetime.now())
     duration = int((datetime.now() - start_time).total_seconds() / 60)
-
     record = {
         "username": st.session_state["username"],
         "doc_name": doc_name,
         "types": types,
         "total_questions": total,
         "correct_count": correct,
-        "score": accuracy,
-        "accuracy": accuracy,
+        "score": avg_score,
+        "accuracy": avg_score,
         "duration": duration,
         "exam_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "details": [
@@ -453,94 +626,89 @@ def save_exam_result(doc_name, types, paper, user_answers, result):
                 "question": paper[i]["question"],
                 "user_answer": user_answers.get(i, ""),
                 "correct_answer": paper[i]["answer"],
-                "grading": result[i]
+                "is_correct": r.get("is_correct", False),
+                "grading": r.get("display", "")
             }
-            for i in range(total)
+            for i, r in enumerate(result)
         ]
     }
     history.append(record)
     save_json(EXAM_HISTORY_FILE, history)
 
-
+# ========== 主函数 ==========
 def main():
+    if "lang" not in st.session_state: st.session_state.lang = "zh"
+    if "background_mode" not in st.session_state: st.session_state["background_mode"] = "white"
+    if "bg_custom_color" not in st.session_state: st.session_state["bg_custom_color"] = "#000000"
+
+    col1, col2 = st.columns([7, 1])
+    with col1:
+        st.markdown(f"<h1 style='margin:0;'>{t('app_title')}</h1>", unsafe_allow_html=True)
+    with col2:
+        lang_opts = [t("chinese"), t("english")]
+        current_lang = "zh" if st.session_state.lang == "zh" else "en"
+        idx = 0 if current_lang == "zh" else 1
+        choice = st.selectbox(t("language"), lang_opts, index=idx, key="lang_selector")
+        if choice == t("chinese") and st.session_state.lang != "zh":
+            st.session_state.lang = "zh"; st.rerun()
+        elif choice == t("english") and st.session_state.lang != "en":
+            st.session_state.lang = "en"; st.rerun()
+
     if "username" not in st.session_state:
         auth_page()
         return
 
     set_background_style()
-
     st.sidebar.markdown(f"### 👤 {st.session_state['username']}")
-    page = st.sidebar.radio("导航菜单", ["📁 上传文档", "👤 个人中心"])
+    page = st.sidebar.radio(t("upload"), [f"📁 {t('upload')}", f"👤 {t('profile')}"])
 
-    if page == "📁 上传文档":
-        st.markdown("<h2 style='color: #1e3a8a;'>📁 文档学习中心</h2>", unsafe_allow_html=True)
-
-        uploaded_file = st.file_uploader(
-            "上传学习资料（支持 PDF / Word / TXT / Markdown）",
-            type=["pdf", "docx", "txt", "md"]
-        )
-
+    if page == f"📁 {t('upload')}":
+        st.markdown(f"<h2 style='color: #1e3a8a;'>📁 {t('upload')}</h2>", unsafe_allow_html=True)
+        uploaded_file = st.file_uploader(t("upload_file"), type=["pdf", "docx", "txt", "md"])
         if not uploaded_file:
-            st.info("👆 请上传文档开始学习")
+            st.info("👆 " + t("upload_file"))
             return
-
         doc_name = uploaded_file.name
-
         if "uploaded_content" not in st.session_state or st.session_state.get("current_doc") != doc_name:
-            with st.spinner("正在解析文档..."):
+            with st.spinner(t("parsing")):
                 content = parse_document(uploaded_file)
                 st.session_state["uploaded_content"] = content
                 st.session_state["current_doc"] = doc_name
-
         content = st.session_state["uploaded_content"]
-        st.success(f"✅ 文档解析完成：{doc_name}（共{len(content)}字符）")
-
-        mode = st.radio("选择学习模式", ["🎤 背诵检查", "📝 知识练习"])
-
-        if mode == "🎤 背诵检查":
+        st.success(t("parse_done").format(doc_name, len(content)))
+        mode = st.radio(t("select_mode"), [f"🎤 {t('recite_mode')}", f"📝 {t('exam_mode')}"])
+        if mode == f"🎤 {t('recite_mode')}":
             recite_mode(doc_name, content)
         else:
-            st.markdown("<h4 style='color: #6d28d9;'>选择题型配置</h4>", unsafe_allow_html=True)
-
+            st.markdown(f"<h4 style='color: #6d28d9;'>{t('question_types')}</h4>", unsafe_allow_html=True)
             col1, col2, col3, col4 = st.columns(4)
             q_types = []
-
             with col1:
-                if st.checkbox("单选题", value=True):
-                    q_types.append("单选题")
+                if st.checkbox(t("single_choice"), value=True): q_types.append("单选题")
             with col2:
-                if st.checkbox("判断题", value=True):
-                    q_types.append("判断题")
+                if st.checkbox(t("true_false"), value=True): q_types.append("判断题")
             with col3:
-                if st.checkbox("填空题", value=True):
-                    q_types.append("填空题")
+                if st.checkbox(t("fill_blank"), value=True): q_types.append("填空题")
             with col4:
-                if st.checkbox("简答题", value=True):
-                    q_types.append("简答题")
-
-            num_questions = st.slider("每种题型数量", min_value=1, max_value=10, value=3)
-
-            if st.button("🚀 生成试卷", use_container_width=True, type="primary") and q_types:
+                if st.checkbox(t("short_answer"), value=True): q_types.append("简答题")
+            num_questions = st.slider(t("num_questions"), min_value=1, max_value=10, value=3)
+            if st.button(f"🚀 {t('generate_paper')}", use_container_width=True, type="primary") and q_types:
+                for key in ["paper", "exam_result", "temp_answers"]:
+                    if key in st.session_state: del st.session_state[key]
                 st.session_state["exam_doc"] = doc_name
                 st.session_state["exam_content"] = content
                 st.session_state["exam_types"] = q_types
                 st.session_state["num_questions"] = num_questions
-                if "paper" in st.session_state:
-                    del st.session_state["paper"]
-                if "exam_result" in st.session_state:
-                    del st.session_state["exam_result"]
                 st.rerun()
-
         if "exam_doc" in st.session_state and "exam_content" in st.session_state:
             exam_interface(
                 st.session_state["exam_doc"],
                 st.session_state["exam_content"],
-                st.session_state.get("exam_types", ["单选题"])
+                st.session_state.get("exam_types", ["单选题"]),
+                st.session_state["num_questions"]
             )
-
-    elif page == "👤 个人中心":
+    else:
         profile_page()
-
 
 if __name__ == "__main__":
     main()
