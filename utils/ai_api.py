@@ -139,7 +139,3 @@ def _ai_grade(question, user_answer):
             return True, 100, "答案正确"
         else:
             return False, 0, "答案错误"
-
-def evaluate_recitation(reference_text, audio_bytes):
-    """背诵评价（可后续接入 DeepSeek）"""
-    return 85, "背诵流利，但有个别词遗漏，继续加油！"
