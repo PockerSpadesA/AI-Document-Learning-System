@@ -1,42 +1,35 @@
-import PyPDF2
-import docx
-import chardet
+import os
 
 
 def parse_document(uploaded_file):
-    filename = uploaded_file.name.lower()
+    """
+    解析上传的文件，返回文本内容。
+    支持：.txt, .md, .pdf, .docx
+    """
+    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
 
-    try:
-        if filename.endswith(".pdf"):
-            reader = PyPDF2.PdfReader(uploaded_file)
-            text = ""
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-            return text.strip()
+    if file_extension in ['.txt', '.md']:
+        return uploaded_file.getvalue().decode('utf-8', errors='ignore')
 
-        elif filename.endswith(".docx"):
+    elif file_extension == '.pdf':
+        try:
+            import PyPDF2
+            pdf_reader = PyPDF2.PdfReader(uploaded_file)
+            text = ''
+            for page in pdf_reader.pages:
+                text += page.extract_text() + '\n'
+            return text
+        except ImportError:
+            return "❌ 需要安装 PyPDF2 库：pip install PyPDF2"
+
+    elif file_extension == '.docx':
+        try:
+            import docx
             doc = docx.Document(uploaded_file)
-            paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
-            return "\n".join(paragraphs)
-
-        elif filename.endswith(".txt"):
-            raw_data = uploaded_file.read()
-            detected = chardet.detect(raw_data)
-            encoding = detected['encoding'] if detected['encoding'] else 'utf-8'
-            text = raw_data.decode(encoding, errors='ignore')
+            text = '\n'.join([para.text for para in doc.paragraphs])
             return text
+        except ImportError:
+            return "❌ 需要安装 python-docx 库：pip install python-docx"
 
-        elif filename.endswith(".md"):
-            raw_data = uploaded_file.read()
-            detected = chardet.detect(raw_data)
-            encoding = detected['encoding'] if detected['encoding'] else 'utf-8'
-            text = raw_data.decode(encoding, errors='ignore')
-            return text
-
-        else:
-            return "不支持的文件格式"
-
-    except Exception as e:
-        return f"文件解析失败：{str(e)}"
+    else:
+        return f"不支持的文件格式：{file_extension}"
