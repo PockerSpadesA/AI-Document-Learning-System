@@ -4,7 +4,7 @@ import os
 import re
 from datetime import datetime
 from utils.file_parser import parse_document
-from utils.ai_api import generate_exam_paper, correct_exam_paper, evaluate_recitation
+from utils.ai_api import generate_exam_paper, correct_exam_paper
 from utils.ocr_engine import image_to_text
 
 st.set_page_config(
@@ -19,9 +19,8 @@ USERS_FILE = os.path.join(DATA_DIR, "users.json")
 WRONG_QUESTIONS_FILE = os.path.join(DATA_DIR, "wrong_questions.json")
 EXAM_HISTORY_FILE = os.path.join(DATA_DIR, "exam_history.json")
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs("static/backgrounds", exist_ok=True)
 
-# ========== 多语言字典（同原版，省略部分保持不变）==========
+# ========== 多语言字典 ==========
 L10N = {
     "zh": {
         "app_title": "AI智能学习考试系统",
@@ -73,14 +72,21 @@ L10N = {
         "recite_scope": "背诵范围",
         "full_text": "全文背诵",
         "paragraph": "段落背诵",
-        "start_line": "起始行号",
-        "end_line": "结束行号",
+        "choose_paragraph": "选择背诵段落",
+        "search_paragraph": "🔍 搜索段落内容（可选）",
+        "search_placeholder": "输入关键词筛选...",
+        "select_para_btn": "选择第 {} 段",
         "reference_text": "参考文本",
-        "recording_hint": "💡 提示：点击录音后朗读，AI将自动评分",
+        "recording_hint": "💡 点击录音后朗读，录音结束后可回听对比",
         "start_recording": "🎙️ 点击开始录音",
-        "submit_recite": "提交检查",
-        "recite_accuracy": "背诵准确率：{}%",
-        "ai_comment": "💬 AI点评：{}",
+        "playback": "🔊 你的录音回放",
+        "self_eval": "自我评价",
+        "eval_good": "😊 很好（90分）",
+        "eval_ok": "😐 还行（70分）",
+        "eval_poor": "😞 不太熟（50分）",
+        "recite_text_display": "📖 背诵内容",
+        "hide_text_mode": "🙈 隐藏文本背诵",
+        "show_text_mode": "📖 显示文本背诵",
         "answer_method": "答题方式（任选其一）：",
         "keyboard_input": "键盘输入",
         "photo_input": "拍照手写",
@@ -165,14 +171,21 @@ L10N = {
         "recite_scope": "Recite Scope",
         "full_text": "Full Text",
         "paragraph": "Paragraph",
-        "start_line": "Start line",
-        "end_line": "End line",
+        "choose_paragraph": "Choose a paragraph to recite",
+        "search_paragraph": "🔍 Search paragraphs (optional)",
+        "search_placeholder": "Enter keyword to filter...",
+        "select_para_btn": "Select paragraph {}",
         "reference_text": "Reference Text",
-        "recording_hint": "💡 Click to record, AI will score automatically",
+        "recording_hint": "💡 Click to record, then playback to compare.",
         "start_recording": "🎙️ Click to start recording",
-        "submit_recite": "Submit Check",
-        "recite_accuracy": "Recitation accuracy: {}%",
-        "ai_comment": "💬 AI comment: {}",
+        "playback": "🔊 Your recording playback",
+        "self_eval": "Self Evaluation",
+        "eval_good": "😊 Good (90 points)",
+        "eval_ok": "😐 Okay (70 points)",
+        "eval_poor": "😞 Not good (50 points)",
+        "recite_text_display": "📖 Recitation Text",
+        "hide_text_mode": "🙈 Hide text",
+        "show_text_mode": "📖 Show text",
         "answer_method": "Answer method (choose one):",
         "keyboard_input": "Keyboard",
         "photo_input": "Photo handwriting",
@@ -230,7 +243,7 @@ def save_json(file_path, data):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ========== 主题系统（保持不变）==========
+# ========== 主题系统 ==========
 THEMES = {
     "极简深蓝": {"primary": "#1e3a8a", "secondary": "#3b82f6", "bg": "#e0e7ff", "card": "#ffffff", "text": "#1e293b", "accent": "#93c5fd"},
     "清新淡绿": {"primary": "#065f46", "secondary": "#10b981", "bg": "#d1fae5", "card": "#ffffff", "text": "#064e3b", "accent": "#6ee7b7"},
@@ -266,7 +279,7 @@ def set_background_style():
     """
     st.markdown(css, unsafe_allow_html=True)
 
-# ========== 认证页面（保持不变）==========
+# ========== 认证页面 ==========
 def auth_page():
     tab_login, tab_register = st.tabs([f"🔐 {t('login')}", f"✍️ {t('register')}"])
     users = load_json(USERS_FILE)
@@ -322,7 +335,7 @@ def auth_page():
                 save_json(USERS_FILE, users)
                 st.success(t("register_success"))
 
-# ========== 个人中心（保持不变）==========
+# ========== 个人中心 ==========
 def profile_page():
     st.markdown(f"<h2 style='color: #1e3a8a;'>👤 {t('profile')}</h2>", unsafe_allow_html=True)
     username = st.session_state["username"]
@@ -431,28 +444,101 @@ def profile_page():
         st.session_state.clear()
         st.rerun()
 
-# ========== 背诵模式（保持不变）==========
+# ========== 智能段落分割 ==========
+def smart_split_paragraphs(content):
+    raw_paragraphs = re.split(r'\n\s*\n', content)
+    paragraphs = []
+    for i, para in enumerate(raw_paragraphs):
+        text = para.strip().replace('\n', ' ')
+        if len(text) < 10:
+            continue
+        preview = text[:60] + "..." if len(text) > 60 else text
+        paragraphs.append({
+            "index": i + 1,
+            "full_text": text,
+            "preview": preview,
+            "char_count": len(text)
+        })
+    return paragraphs
+
+# ========== 背诵模式（修复搜索：全文任意位置匹配）==========
 def recite_mode(doc_name, content):
     st.markdown(f"<h3 style='color: #059669;'>🎤 {t('recite_mode')}</h3>", unsafe_allow_html=True)
-    scope = st.radio(t("recite_scope"), [t("full_text"), t("paragraph")])
-    show_text = content
-    if scope == t("paragraph"):
-        lines = content.split('\n')
-        start_idx = st.number_input(t("start_line"), min_value=1, max_value=len(lines), value=1)
-        end_idx = st.number_input(t("end_line"), min_value=start_idx, max_value=len(lines), value=min(start_idx + 10, len(lines)))
-        show_text = '\n'.join(lines[start_idx - 1:end_idx])
-    st.text_area(t("reference_text"), show_text, height=200, disabled=True)
-    st.info(t("recording_hint"))
-    audio = st.audio_input(t("start_recording"))
-    if audio:
-        if st.button(t("submit_recite"), type="primary"):
-            with st.spinner(t("parsing")):
-                score, comment = evaluate_recitation(show_text, audio)
-            st.progress(score / 100)
-            st.success(t("recite_accuracy").format(score))
-            st.info(t("ai_comment").format(comment))
 
-# ========== 考试界面（已移除防作弊，确保未作答得0分）==========
+    paragraphs = smart_split_paragraphs(content)
+    if not paragraphs:
+        st.warning("文档内容过短，无法分段背诵")
+        return
+
+    st.markdown(f"### 📝 {t('choose_paragraph')}")
+
+    # 搜索框（固定 key 保留输入）
+    search = st.text_input(
+        t("search_paragraph"),
+        placeholder=t("search_placeholder"),
+        key="search_para_input"
+    )
+
+    # 改进的过滤逻辑：忽略大小写，同时检查 full_text 和 preview
+    filtered = paragraphs
+    if search:
+        search_lower = search.lower()
+        filtered = [
+            p for p in paragraphs
+            if search_lower in p["full_text"].lower() or search_lower in p["preview"].lower()
+        ]
+        if not filtered:
+            st.warning("没有找到包含该关键词的段落，请尝试其他词")
+
+    selected_paragraph = None
+    cols_per_row = 2
+    for i in range(0, len(filtered), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j in range(cols_per_row):
+            idx = i + j
+            if idx < len(filtered):
+                para = filtered[idx]
+                with cols[j]:
+                    st.markdown(f"""
+                    <div style='border: 2px solid #e0e0e0; border-radius: 10px; 
+                                padding: 15px; margin: 5px 0; background: #f9fafb;'>
+                        <p style='font-size: 14px; color: #333;'>{para['preview']}</p>
+                        <p style='font-size: 12px; color: #666;'>{para['char_count']} 字</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button(t("select_para_btn").format(para['index']), key=f"sel_{para['index']}"):
+                        selected_paragraph = para["full_text"]
+                        st.rerun()
+
+    if selected_paragraph:
+        st.markdown("---")
+        st.markdown(f"### {t('recite_text_display')}")
+        mode = st.radio("模式", [t("show_text_mode"), t("hide_text_mode")], horizontal=True)
+        if mode == t("show_text_mode"):
+            st.text_area("原文", selected_paragraph, height=200, disabled=True)
+        else:
+            st.info("文本已隐藏，请尝试背诵")
+
+        st.info(t("recording_hint"))
+        audio = st.audio_input(t("start_recording"))
+
+        if audio:
+            st.audio(audio, format="audio/wav")
+            st.markdown(f"### {t('self_eval')}")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button(t("eval_good"), use_container_width=True):
+                    st.success("继续保持！")
+            with col2:
+                if st.button(t("eval_ok"), use_container_width=True):
+                    st.info("还需努力！")
+            with col3:
+                if st.button(t("eval_poor"), use_container_width=True):
+                    st.warning("多读几遍！")
+    else:
+        st.info("👆 请选择一个段落开始背诵")
+
+# ========== 考试界面（无防作弊，未作答强制0分）==========
 def exam_interface(doc_name, content, question_types, num_per_type):
     st.markdown(f"<h3 style='color: #dc2626;'>📝 {t('exam_mode')}</h3>", unsafe_allow_html=True)
 
@@ -470,8 +556,7 @@ def exam_interface(doc_name, content, question_types, num_per_type):
     user_answers = {}
     for idx, q in enumerate(paper):
         st.markdown("---")
-        st.markdown(f"**<span style='font-size: 18px; color: #1e3a8a;'>第{idx + 1}题 [{q['type']}]</span>**",
-                    unsafe_allow_html=True)
+        st.markdown(f"**<span style='font-size: 18px; color: #1e3a8a;'>第{idx + 1}题 [{q['type']}]</span>**", unsafe_allow_html=True)
         st.markdown(f"**{q['question']}**")
         q_type = q["type"]
 
@@ -487,14 +572,13 @@ def exam_interface(doc_name, content, question_types, num_per_type):
                 else:
                     user_answers[idx] = choice
             else:
-                user_answers[idx] = ""   # 未选择
+                user_answers[idx] = ""
         elif q_type == "填空题":
             st.markdown(f"**{t('answer_method')}**")
             tab_txt, tab_photo = st.tabs([t("keyboard_input"), t("photo_input")])
             with tab_txt:
                 txt_ans = st.text_input(t("enter_answer"), key=f"txt_{idx}")
             with tab_photo:
-                st.info("📸 " + t("upload_photo"))
                 photo_ans = st.file_uploader(t("upload_photo"), type=["jpg", "png", "jpeg"], key=f"photo_{idx}")
                 ocr_text = ""
                 if photo_ans:
@@ -508,7 +592,6 @@ def exam_interface(doc_name, content, question_types, num_per_type):
             with tab_txt:
                 txt_ans = st.text_area(t("enter_answer"), height=150, key=f"txt_{idx}")
             with tab_photo:
-                st.info("📸 " + t("upload_photo"))
                 photo_ans = st.file_uploader(t("upload_photo"), type=["jpg", "png", "jpeg"], key=f"photo_{idx}")
                 ocr_text = ""
                 if photo_ans:
@@ -524,7 +607,6 @@ def exam_interface(doc_name, content, question_types, num_per_type):
         if st.button(f"✅ {t('submit_paper')}", use_container_width=True, type="primary"):
             with st.spinner(t("parsing")):
                 result = correct_exam_paper(paper, user_answers)
-                # 强制修正：未作答一律判错，并修改显示文本中的图标和得分
                 for i, res in enumerate(result):
                     if user_answers.get(i, "").strip() == "":
                         res["is_correct"] = False
@@ -551,7 +633,6 @@ def display_exam_result(doc_name):
         else:
             if item["is_correct"]:
                 total_score += 100
-
     avg_score = int(total_score / total) if total > 0 else 0
     correct = sum(1 for r in result if r.get("is_correct", False))
 
@@ -568,7 +649,6 @@ def display_exam_result(doc_name):
 
     for idx, item in enumerate(result):
         is_correct = item.get("is_correct", False)
-        # 二次确保未作答显示红叉
         if user_answers.get(idx, "").strip() == "" and is_correct:
             is_correct = False
             item["display"] = item.get("display", "").replace("✅", "❌")
