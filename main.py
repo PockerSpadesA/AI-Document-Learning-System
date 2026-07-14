@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import re
+import uuid
 from datetime import datetime
 from utils.file_parser import parse_document
 from utils.ai_api import generate_exam_paper, correct_exam_paper
@@ -18,12 +19,16 @@ DATA_DIR = "data"
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 WRONG_QUESTIONS_FILE = os.path.join(DATA_DIR, "wrong_questions.json")
 EXAM_HISTORY_FILE = os.path.join(DATA_DIR, "exam_history.json")
-os.makedirs(DATA_DIR, exist_ok=True)
+TOKENS_FILE = os.path.join(DATA_DIR, "tokens.json")
+DOC_CACHE_DIR = os.path.join(DATA_DIR, "doc_cache")
 
-# ========== 多语言字典 ==========
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(DOC_CACHE_DIR, exist_ok=True)
+
+# ========== 多语言字典（完整，未省略）==========
 L10N = {
     "zh": {
-        "app_title": "AI智能学习考试系统",
+        "app_title": "AI文档双模式学习系统",
         "login": "登录",
         "register": "注册",
         "username": "用户名",
@@ -279,8 +284,51 @@ def set_background_style():
     """
     st.markdown(css, unsafe_allow_html=True)
 
-# ========== 认证页面 ==========
+# ========== Token 管理 ==========
+def generate_token(username):
+    tokens = load_json(TOKENS_FILE)
+    token = str(uuid.uuid4())
+    tokens = [t for t in tokens if t["username"] != username]
+    tokens.append({"username": username, "token": token, "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    save_json(TOKENS_FILE, tokens)
+    return token
+
+def get_username_by_token(token):
+    tokens = load_json(TOKENS_FILE)
+    for t in tokens:
+        if t["token"] == token:
+            return t["username"]
+    return None
+
+def remove_token(token):
+    tokens = load_json(TOKENS_FILE)
+    tokens = [t for t in tokens if t["token"] != token]
+    save_json(TOKENS_FILE, tokens)
+
+# ========== 文档缓存（刷新不丢失）==========
+def save_doc_cache(username, doc_name, content):
+    cache_file = os.path.join(DOC_CACHE_DIR, f"{username}.json")
+    data = {"doc_name": doc_name, "content": content}
+    save_json(cache_file, data)
+
+def load_doc_cache(username):
+    cache_file = os.path.join(DOC_CACHE_DIR, f"{username}.json")
+    if os.path.exists(cache_file):
+        try:
+            data = load_json(cache_file)
+            return data.get("doc_name"), data.get("content")
+        except:
+            pass
+    return None, None
+
+def clear_doc_cache(username):
+    cache_file = os.path.join(DOC_CACHE_DIR, f"{username}.json")
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+
+# ========== 认证页面（含标题）==========
 def auth_page():
+    st.markdown(f"<h1 style='text-align: center;'>{t('app_title')}</h1>", unsafe_allow_html=True)
     tab_login, tab_register = st.tabs([f"🔐 {t('login')}", f"✍️ {t('register')}"])
     users = load_json(USERS_FILE)
     with tab_login:
@@ -299,6 +347,8 @@ def auth_page():
                         st.session_state["bg_history"] = user.get("bg_history", [])
                         st.session_state["background_mode"] = user.get("background_mode", "white")
                         st.session_state["bg_custom_color"] = user.get("bg_custom_color", "#000000")
+                        token = generate_token(uname)
+                        st.query_params["token"] = token
                         st.success(t("welcome_back").format(uname))
                         st.rerun()
                 st.error(t("wrong_cred"))
@@ -441,45 +491,50 @@ def profile_page():
             st.info(t("no_history"))
     st.divider()
     if st.button(f"🚪 {t('logout')}", use_container_width=True, type="secondary"):
+        token = st.query_params.get("token")
+        if token:
+            remove_token(token)
+        # 清除文档缓存
+        clear_doc_cache(username)
         st.session_state.clear()
+        st.query_params.clear()
         st.rerun()
 
-# ========== 智能段落分割 ==========
+# ========== 智能段落分割（简单版，不过滤噪音）==========
 def smart_split_paragraphs(content):
     raw_paragraphs = re.split(r'\n\s*\n', content)
-    paragraphs = []
-    for i, para in enumerate(raw_paragraphs):
+    valid_paragraphs = []
+    for para in raw_paragraphs:
         text = para.strip().replace('\n', ' ')
-        if len(text) < 10:
+        if len(text) < 10:   # 只过滤太短的
             continue
         preview = text[:60] + "..." if len(text) > 60 else text
-        paragraphs.append({
-            "index": i + 1,
+        valid_paragraphs.append({
             "full_text": text,
             "preview": preview,
             "char_count": len(text)
         })
-    return paragraphs
+    for i, p in enumerate(valid_paragraphs):
+        p["index"] = i + 1
+    return valid_paragraphs
 
-# ========== 背诵模式（修复搜索：全文任意位置匹配）==========
+# ========== 背诵模式 ==========
 def recite_mode(doc_name, content):
     st.markdown(f"<h3 style='color: #059669;'>🎤 {t('recite_mode')}</h3>", unsafe_allow_html=True)
 
     paragraphs = smart_split_paragraphs(content)
     if not paragraphs:
-        st.warning("文档内容过短，无法分段背诵")
+        st.warning("文档内容过短或无明显段落，无法分段背诵")
         return
 
     st.markdown(f"### 📝 {t('choose_paragraph')}")
 
-    # 搜索框（固定 key 保留输入）
     search = st.text_input(
         t("search_paragraph"),
         placeholder=t("search_placeholder"),
         key="search_para_input"
     )
 
-    # 改进的过滤逻辑：忽略大小写，同时检查 full_text 和 preview
     filtered = paragraphs
     if search:
         search_lower = search.lower()
@@ -490,7 +545,6 @@ def recite_mode(doc_name, content):
         if not filtered:
             st.warning("没有找到包含该关键词的段落，请尝试其他词")
 
-    selected_paragraph = None
     cols_per_row = 2
     for i in range(0, len(filtered), cols_per_row):
         cols = st.columns(cols_per_row)
@@ -507,9 +561,10 @@ def recite_mode(doc_name, content):
                     </div>
                     """, unsafe_allow_html=True)
                     if st.button(t("select_para_btn").format(para['index']), key=f"sel_{para['index']}"):
-                        selected_paragraph = para["full_text"]
+                        st.session_state["selected_paragraph"] = para["full_text"]
                         st.rerun()
 
+    selected_paragraph = st.session_state.get("selected_paragraph", None)
     if selected_paragraph:
         st.markdown("---")
         st.markdown(f"### {t('recite_text_display')}")
@@ -535,10 +590,13 @@ def recite_mode(doc_name, content):
             with col3:
                 if st.button(t("eval_poor"), use_container_width=True):
                     st.warning("多读几遍！")
+        if st.button("🔙 重新选择段落"):
+            st.session_state.pop("selected_paragraph", None)
+            st.rerun()
     else:
         st.info("👆 请选择一个段落开始背诵")
 
-# ========== 考试界面（无防作弊，未作答强制0分）==========
+# ========== 考试界面 ==========
 def exam_interface(doc_name, content, question_types, num_per_type):
     st.markdown(f"<h3 style='color: #dc2626;'>📝 {t('exam_mode')}</h3>", unsafe_allow_html=True)
 
@@ -721,6 +779,29 @@ def main():
     if "background_mode" not in st.session_state: st.session_state["background_mode"] = "white"
     if "bg_custom_color" not in st.session_state: st.session_state["bg_custom_color"] = "#000000"
 
+    # 自动登录检测
+    if "username" not in st.session_state:
+        token = st.query_params.get("token")
+        if token:
+            username = get_username_by_token(token)
+            if username:
+                users = load_json(USERS_FILE)
+                user_data = next((u for u in users if u["username"] == username), None)
+                if user_data:
+                    st.session_state["username"] = username
+                    st.session_state["current_bg"] = user_data.get("bg", "极简深蓝")
+                    st.session_state["bg_history"] = user_data.get("bg_history", [])
+                    st.session_state["background_mode"] = user_data.get("background_mode", "white")
+                    st.session_state["bg_custom_color"] = user_data.get("bg_custom_color", "#000000")
+                    # 尝试恢复文档缓存
+                    doc_name, content = load_doc_cache(username)
+                    if doc_name and content:
+                        st.session_state["uploaded_content"] = content
+                        st.session_state["current_doc"] = doc_name
+                    st.rerun()
+        auth_page()
+        return
+
     col1, col2 = st.columns([7, 1])
     with col1:
         st.markdown(f"<h1 style='margin:0;'>{t('app_title')}</h1>", unsafe_allow_html=True)
@@ -734,10 +815,6 @@ def main():
         elif choice == t("english") and st.session_state.lang != "en":
             st.session_state.lang = "en"; st.rerun()
 
-    if "username" not in st.session_state:
-        auth_page()
-        return
-
     set_background_style()
     st.sidebar.markdown(f"### 👤 {st.session_state['username']}")
     page = st.sidebar.radio(t("upload"), [f"📁 {t('upload')}", f"👤 {t('profile')}"])
@@ -746,7 +823,11 @@ def main():
         st.markdown(f"<h2 style='color: #1e3a8a;'>📁 {t('upload')}</h2>", unsafe_allow_html=True)
         uploaded_file = st.file_uploader(t("upload_file"), type=["pdf", "docx", "txt", "md"])
         if not uploaded_file:
-            st.info("👆 " + t("upload_file"))
+            # 如果有缓存的文档，则显示提示
+            if "uploaded_content" in st.session_state and "current_doc" in st.session_state:
+                st.info(f"当前文档：{st.session_state['current_doc']}（已缓存）")
+            else:
+                st.info("👆 " + t("upload_file"))
             return
         doc_name = uploaded_file.name
         if "uploaded_content" not in st.session_state or st.session_state.get("current_doc") != doc_name:
@@ -754,6 +835,8 @@ def main():
                 content = parse_document(uploaded_file)
                 st.session_state["uploaded_content"] = content
                 st.session_state["current_doc"] = doc_name
+                # 保存到缓存
+                save_doc_cache(st.session_state["username"], doc_name, content)
         content = st.session_state["uploaded_content"]
         st.success(t("parse_done").format(doc_name, len(content)))
         mode = st.radio(t("select_mode"), [f"🎤 {t('recite_mode')}", f"📝 {t('exam_mode')}"])
