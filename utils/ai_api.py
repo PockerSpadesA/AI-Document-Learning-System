@@ -52,7 +52,7 @@ def _generate_single_question(content, qtype):
 
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=1000,
@@ -125,7 +125,7 @@ def _ai_grade(question, user_answer):
 
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=200,
